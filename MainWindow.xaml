@@ -1,0 +1,60 @@
+<!-- Эта разметка описывает внешний вид окна. Код обработчиков лежит в MainWindow.xaml.cs. -->
+<Window
+    x:Class="OrdinaTuteur.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="OrdinaTuteur">
+    <!-- Полупрозрачный фон окна Windows. -->
+    <Window.SystemBackdrop>
+        <DesktopAcrylicBackdrop />
+    </Window.SystemBackdrop>
+
+    <!-- Главное окно: чат занимает свободное место, ввод закреплён снизу. -->
+    <Grid Padding="24" RowSpacing="16">
+        <!-- Первая строка растягивается, вторая занимает высоту поля ввода. -->
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- История чата прокручивается независимо от поля ввода. -->
+        <ScrollViewer
+            x:Name="ChatScroll"
+            Grid.Row="0"
+            VerticalScrollBarVisibility="Auto">
+            <!-- C# добавляет сюда карточки сообщений по мере общения. -->
+            <StackPanel
+                x:Name="ChatMessages"
+                Spacing="12"
+                Padding="0,0,8,0" />
+        </ScrollViewer>
+
+        <!-- Нижняя панель делит место между полем текста и кнопкой. -->
+        <Grid Grid.Row="1" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Поле принимает новую задачу; Enter вызывает обработчик в C#. -->
+            <TextBox
+                x:Name="PromptInput"
+                Grid.Column="0"
+                PlaceholderText="Напишите сообщение..."
+                FontSize="15"
+                MinHeight="48"
+                VerticalContentAlignment="Center"
+                AcceptsReturn="False"
+                KeyDown="PromptInput_KeyDown" />
+
+            <!-- Нажатие кнопки вызывает метод SendButton_Click в коде окна. -->
+            <Button
+                x:Name="SendButton"
+                Grid.Column="1"
+                Content="Отправить"
+                MinHeight="48"
+                Padding="18,0"
+                Click="SendButton_Click" />
+        </Grid>
+    </Grid>
+</Window>
