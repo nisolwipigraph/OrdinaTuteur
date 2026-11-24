@@ -1,22 +1,21 @@
-// Подключаем типы WinUI, которые нужны для создания окна приложения.
 using Microsoft.UI.Xaml;
 
 namespace OrdinaTuteur;
 
-// Точка входа WinUI-приложения: создаёт и показывает главное окно.
+// С этого класса Windows запускает приложение.
 public sealed partial class App : Application
 {
-    // Ссылка не даёт сборщику мусора удалить окно во время работы программы.
+    // Поле держит окно живым. Без ссылки сборщик мусора может закрыть его
+    // сразу после OnLaunched, потому что локальная переменная уже исчезла.
     private Window? _mainWindow;
 
-    // Загружает ресурсы приложения, описанные в App.xaml.
+    // Загружает ресурсы из App.xaml: стили и цвета WinUI.
     public App() => InitializeComponent();
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        // Windows вызывает этот метод, когда приложение запускается.
         _mainWindow = new MainWindow();
-        // Делаем созданное окно видимым.
+        // Activate показывает окно и передаёт ему фокус клавиатуры.
         _mainWindow.Activate();
     }
 }

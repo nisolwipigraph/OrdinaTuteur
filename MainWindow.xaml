@@ -1,42 +1,40 @@
-<!-- Эта разметка описывает внешний вид окна. Код обработчиков лежит в MainWindow.xaml.cs. -->
+<!-- Внешний вид окна. Реакция на кнопки написана в MainWindow.xaml.cs. -->
 <Window
     x:Class="OrdinaTuteur.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="OrdinaTuteur">
-    <!-- Полупрозрачный фон окна Windows. -->
+    <!-- Полупрозрачный фон в стиле Windows 11. -->
     <Window.SystemBackdrop>
         <DesktopAcrylicBackdrop />
     </Window.SystemBackdrop>
 
-    <!-- Главное окно: чат занимает свободное место, ввод закреплён снизу. -->
+    <!-- Сверху чат занимает всё свободное место, снизу поле ввода и кнопка. -->
     <Grid Padding="24" RowSpacing="16">
-        <!-- Первая строка растягивается, вторая занимает высоту поля ввода. -->
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- История чата прокручивается независимо от поля ввода. -->
+        <!-- Чат прокручивается отдельно от поля ввода. -->
         <ScrollViewer
             x:Name="ChatScroll"
             Grid.Row="0"
             VerticalScrollBarVisibility="Auto">
-            <!-- C# добавляет сюда карточки сообщений по мере общения. -->
+            <!-- C# добавляет сюда карточки сообщений по одной. -->
             <StackPanel
                 x:Name="ChatMessages"
                 Spacing="12"
                 Padding="0,0,8,0" />
         </ScrollViewer>
 
-        <!-- Нижняя панель делит место между полем текста и кнопкой. -->
         <Grid Grid.Row="1" ColumnSpacing="10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <!-- Поле принимает новую задачу; Enter вызывает обработчик в C#. -->
+            <!-- Enter вызывает PromptInput_KeyDown и отправляет задачу. -->
             <TextBox
                 x:Name="PromptInput"
                 Grid.Column="0"
@@ -47,7 +45,6 @@
                 AcceptsReturn="False"
                 KeyDown="PromptInput_KeyDown" />
 
-            <!-- Нажатие кнопки вызывает метод SendButton_Click в коде окна. -->
             <Button
                 x:Name="SendButton"
                 Grid.Column="1"

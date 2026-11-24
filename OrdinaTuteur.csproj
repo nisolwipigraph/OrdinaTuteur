@@ -1,46 +1,43 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Основные настройки сборки приложения. -->
   <PropertyGroup>
-    <!-- Программа с окном, а не консольное приложение. -->
+    <!-- Окно, а не чёрная консоль. -->
     <OutputType>WinExe</OutputType>
-    <!-- Нужны .NET 10 и функции Windows из версии 10.0.19041.0 и новее. -->
+    <!-- .NET 10 и функции Windows начиная с 10.0.19041. Подходит и Windows 11. -->
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- Самая старая Windows, на которую ещё можно поставить сборку. -->
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
-    <!-- Используем WinUI и запускаемся без установки MSIX-пакета. -->
+    <!-- WinUI без упаковки в магазинный MSIX: запускается обычный exe. -->
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <!-- Включаем нужные части Windows App SDK в собранное приложение. -->
+    <!-- Нужные части Windows App SDK кладутся рядом с exe.
+         На другом компьютере отдельно ставить среду выполнения окна не нужно. -->
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <EnableMsixTooling>true</EnableMsixTooling>
-    <!-- Собираем 64-разрядную версию для Windows x64. -->
+    <!-- Только 64-bit Windows. OrdinaTuteur.sln собирает ту же платформу. -->
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <!-- Компилятор предупреждает о переменных, которые могут содержать null. -->
+    <!-- Компилятор предупреждает, если значение может быть пустым. -->
     <Nullable>enable</Nullable>
-    <!-- Часто используемые пространства имён доступны без отдельных using. -->
+    <!-- Частые пространства имён подключаются сами, без длинного списка using. -->
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Этот файл задаёт настройки совместимости приложения с Windows. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <!-- Имя пространства имён по умолчанию для кода приложения. -->
     <RootNamespace>OrdinaTuteur</RootNamespace>
   </PropertyGroup>
 
-  <!-- Библиотеки, от которых зависит сборка. -->
   <ItemGroup>
-    <!-- WinUI даёт элементы окна и средства для Windows-приложений. -->
+    <!-- Элементы окна WinUI. -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.250907003" />
-    <!-- Набор инструментов Windows SDK нужен для сборки приложения. -->
+    <!-- Инструменты сборки Windows SDK. Ставятся через NuGet при первой сборке. -->
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.6584" />
   </ItemGroup>
 
-  <!-- Копируем эти Python-файлы рядом с приложением при сборке. -->
+  <!-- Копируем Python рядом с exe. Рабочая папка программы — эта папка,
+       поэтому brain.py находит AIKey.py без абсолютного пути. -->
   <ItemGroup>
-    <!-- brain.py получает ключ из этого файла во время работы. -->
     <None Update="AIKey.py" CopyToOutputDirectory="PreserveNewest" />
-    <!-- C# запускает этот файл для снимков экрана и запросов к ИИ. -->
     <None Update="brain.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

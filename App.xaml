@@ -1,10 +1,10 @@
+<!-- Общие ресурсы приложения. Само окно описано в MainWindow.xaml. -->
 <Application
     x:Class="OrdinaTuteur.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Общие ресурсы приложения. -->
     <Application.Resources>
-        <!-- Стандартные стили и цвета элементов управления WinUI. -->
+        <!-- Стандартные цвета и стили кнопок, полей и карточек WinUI. -->
         <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
     </Application.Resources>
 </Application>

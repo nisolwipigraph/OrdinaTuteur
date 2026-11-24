@@ -1,4 +1,4 @@
-// Подключаем работу с процессами, текстом, JSON и элементами WinUI.
+// Подключаем запуск процессов, текст и разбор JSON.
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -10,89 +10,87 @@ using Windows.System;
 
 namespace OrdinaTuteur;
 
-// Это код главного окна: он реагирует на кнопки и связывает экран с Python.
+// Код главного окна. Разметка лежит в MainWindow.xaml.
+// Здесь кнопки, память текущей задачи и связь с brain.py.
 public sealed partial class MainWindow : Window
 {
-    // Python и C# обмениваются UTF-8 текстом; false не добавляет BOM в начало.
+    // false означает: не добавлять скрытый символ BOM в начало текста.
+    // Иначе Python может не разобрать первую JSON-команду.
     private static readonly Encoding Utf8 = new UTF8Encoding(false);
 
-    // В этих настройках JSON использует привычные для API имена свойств.
+    // Web-настройки пишут имена полей маленькими буквами: role, а не Role.
+    // Так же их ждёт brain.py.
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    // Пока выполняется запрос, блокируем отправку других сообщений.
+    // Пока идёт запрос, второе сообщение отправить нельзя.
     private bool _busy;
 
     public MainWindow()
     {
-        // Создаёт элементы окна, описанные в MainWindow.xaml.
+        // Создаёт элементы, описанные в MainWindow.xaml: чат, поле и кнопку.
         InitializeComponent();
     }
 
-    // Хранит части одной карточки, чтобы позже менять её текст и статус.
+    // Карточка на экране. Храним ссылки, чтобы потом менять текст и кнопки.
     private sealed class ChatMessage(TextBlock text, StackPanel body, Border bubble)
     {
-        // Сохраняем ссылки на элементы, созданные при показе сообщения.
         public TextBlock Text { get; } = text;
         public StackPanel Body { get; } = body;
         public Border Bubble { get; } = bubble;
-        public TextBlock? Status { get; set; }
     }
 
-    // Одно сообщение в истории, которую Python отправляет ИИ.
-    private sealed class GuideMemoryMessage(string role, string content)
+    // Одна реплика для ИИ. role — это "user" или "assistant".
+    private sealed class MemoryMessage(string role, string content)
     {
-        // role обычно равен user или assistant, content содержит текст.
         public string Role { get; } = role;
         public string Content { get; } = content;
     }
 
-    // Один ответ ИИ: инструкция и признак завершённой задачи.
-    private sealed class GuideStepResponse(bool done, string instruction)
+    // Готовый ответ Python: задача закончена или нет, и что показать.
+    private sealed class StepAnswer(bool done, string instruction)
     {
         public bool Done { get; } = done;
         public string Instruction { get; } = instruction;
     }
 
-    // Описывает одно JSON-событие, которое Python выводит в консоль.
+    // Одна строка, которую печатает brain.py.
+    // Для снимка заполнено Image, для шага — Done и Instruction.
     private sealed class BrainEvent
     {
-        // Type отличает текстовый фрагмент, готовый ответ и снимок экрана.
         public string Type { get; set; } = "";
-        public string? Text { get; set; }
         public string? Image { get; set; }
         public bool Done { get; set; }
         public string? Instruction { get; set; }
     }
 
-    // Память одной задачи. Новое сообщение создаёт новую такую сессию.
-    private sealed class GuideSession(string question)
+    // Память одной задачи. Новая фраза в поле ввода создаёт новую сессию.
+    // Списки живут только в памяти и пропадают вместе с окном.
+    private sealed class TaskSession(string question)
     {
-        // Сохраняем исходную задачу, чтобы передавать её ИИ на каждом шаге.
         public string Question { get; } = question;
-        // Сюда попадают шаги, которые пользователь подтвердил кнопкой «Дальше».
         public List<string> CompletedSteps { get; } = [];
-        // Здесь хранится короткая переписка внутри текущей задачи.
-        public List<GuideMemoryMessage> History { get; } = [];
+        public List<MemoryMessage> History { get; } = [];
     }
 
-    // Данные одного запроса: нужны для показа и для повторной проверки ответа.
+    // Копия состояния на момент шага.
+    // Она нужна кнопке «Переделать»: снимок и история не должны уехать вперёд,
+    // даже если пользователь уже нажал «Дальше» у более позднего шага.
     private sealed class StepRequest(
         IReadOnlyList<string> completedSteps,
-        IReadOnlyList<GuideMemoryMessage> history,
+        IReadOnlyList<MemoryMessage> history,
         string image,
         int number)
     {
-        // Запоминаем состояние на момент запроса, чтобы повтор использовал тот же снимок.
         public IReadOnlyList<string> CompletedSteps { get; } = completedSteps;
-        public IReadOnlyList<GuideMemoryMessage> History { get; } = history;
+        public IReadOnlyList<MemoryMessage> History { get; } = history;
         public string Image { get; } = image;
         public int Number { get; } = number;
     }
 
-    // Создаёт карточку чата и добавляет её в историю на экране.
+    // Рисует одну карточку и добавляет её вниз чата.
     private ChatMessage AddMessage(string text, bool user)
     {
-        // StackPanel размещает подпись, текст сообщения и кнопки сверху вниз.
+        // Сверху подпись «Ты» или «OrdinaTuteur», под ней текст, потом кнопки.
         var body = new StackPanel { Spacing = 6 };
         body.Children.Add(new TextBlock
         {
@@ -101,7 +99,7 @@ public sealed partial class MainWindow : Window
             Opacity = 0.75
         });
 
-        // TextBlock показывает содержимое сообщения и позволяет его выделить.
+        // Текст можно выделить мышкой. Wrap переносит длинные строки.
         var content = new TextBlock
         {
             Text = text,
@@ -111,7 +109,7 @@ public sealed partial class MainWindow : Window
         };
         body.Children.Add(content);
 
-        // Border рисует фон и скруглённые края карточки.
+        // Сообщение пользователя рисуем акцентным цветом и прижимаем вправо.
         var bubble = new Border
         {
             Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[
@@ -123,142 +121,114 @@ public sealed partial class MainWindow : Window
             Child = body
         };
         ChatMessages.Children.Add(bubble);
-        // После добавления прокручиваем список, чтобы было видно новое сообщение.
         ScrollToLatest();
         return new ChatMessage(content, body, bubble);
     }
 
-    // Меняет текст сообщения; при необходимости прокручивает чат вниз.
-    private void UpdateText(TextBlock text, string value, bool scrollToLatest = true)
+    // Меняет текст карточки и прокручивает чат, чтобы его было видно.
+    private void UpdateText(TextBlock text, string value)
     {
         text.Text = value;
-        if (scrollToLatest)
-            ScrollToLatest();
+        ScrollToLatest();
     }
 
-    // Добавляет подпись с ошибкой или убирает её, если ошибки больше нет.
-    private void SetStatus(ChatMessage message, string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-        {
-            // Удаляем старую подпись из окна и очищаем сохранённую ссылку.
-            if (message.Status is not null)
-                message.Body.Children.Remove(message.Status);
-            message.Status = null;
-            return;
-        }
-
-        // Создаём подпись только один раз; далее меняем её текст.
-        message.Status ??= new TextBlock
-        {
-            FontSize = 13,
-            Opacity = 0.75,
-            TextWrapping = TextWrapping.Wrap
-        };
-        if (!message.Body.Children.Contains(message.Status))
-            message.Body.Children.Add(message.Status);
-        message.Status.Text = value;
-    }
-
-    // Пересчитывает размер содержимого и прокручивает чат к последней карточке.
+    // UpdateLayout нужен, чтобы ScrollableHeight уже знала новую высоту.
     private void ScrollToLatest()
     {
         ChatMessages.UpdateLayout();
         ChatScroll.ChangeView(null, ChatScroll.ScrollableHeight, null);
     }
 
-    // Обрабатывает Enter так же, как нажатие кнопки «Отправить».
+    // Enter в поле ввода работает так же, как кнопка «Отправить».
     private void PromptInput_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key != VirtualKey.Enter)
             return;
 
-        // Не даём Enter перейти на новую строку в поле ввода.
+        // Handled не даёт полю ввода обработать Enter ещё раз.
         e.Handled = true;
         SendButton_Click(sender, new RoutedEventArgs());
     }
 
-    // Проверяет введённый текст и начинает новую сессию задачи.
+    // Начинает новую задачу. Старые карточки на экране остаются.
     private async void SendButton_Click(object sender, RoutedEventArgs e)
     {
-        // Trim убирает пробелы по краям сообщения.
+        // Trim убирает пробелы и пустые строки по краям.
         string question = PromptInput.Text.Trim();
         if (_busy || question.Length == 0)
             return;
 
-        // Показываем отправленный текст и просим ИИ подготовить первый шаг.
         AddMessage(question, true);
-        if (await RequestNextStepAsync(new GuideSession(question)))
+        // Поле очищаем только после удачного ответа. Иначе текст не пропадёт,
+        // и его можно отправить ещё раз кнопкой «Повторить».
+        if (await AskForNextStep(new TaskSession(question)))
             PromptInput.Text = "";
     }
 
-    // Добавляет к ответу кнопки «Дальше» и «Переделать ответ».
+    // Под ответом ИИ появляются «Дальше» и кнопка переделки.
     private void AddStepButtons(
         ChatMessage message,
-        GuideSession session,
+        TaskSession session,
         StepRequest request,
         string instruction,
         bool done)
     {
-        // Если задача уже выполнена, продолжать её не нужно.
+        // У готовой задачи продолжать некуда, поэтому «Дальше» выключена.
         var next = new Button { Content = "Дальше", IsEnabled = !done };
+        // E72C — значок обновления из шрифта Windows. Подпись нужна для
+        // подсказки мыши и для программ чтения с экрана.
         var revise = new Button { Content = new FontIcon { Glyph = "\uE72C" } };
-        // Подсказка и доступное имя объясняют кнопку со значком.
         ToolTipService.SetToolTip(revise, "Переделать ответ");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(revise, "Переделать ответ");
 
-        // Кнопки стоят рядом друг с другом.
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         buttons.Children.Add(next);
         buttons.Children.Add(revise);
         message.Body.Children.Add(buttons);
 
-        // Локальные значения обновляются, когда пользователь переделывает ответ.
+        // current и complete меняются, если пользователь переделал ответ.
+        // saved не даёт записать один и тот же шаг в историю дважды.
         string current = instruction;
         bool complete = done;
-        bool recorded = false;
+        bool saved = false;
 
         next.Click += async (_, _) =>
         {
-            // Не запускаем два действия одновременно.
             if (_busy)
                 return;
 
             next.IsEnabled = false;
             revise.IsEnabled = false;
-            if (!recorded)
+            if (!saved)
             {
-                // Нажатие «Дальше» подтверждает текущий шаг и добавляет его в историю.
                 session.CompletedSteps.Add(current);
-                session.History.Add(
-                    new GuideMemoryMessage("user", $"Пользователь подтвердил шаг: {current}"));
-                recorded = true;
+                session.History.Add(new MemoryMessage("user", "Пользователь подтвердил шаг: " + current));
+                saved = true;
             }
 
-            // Запрашиваем следующий шаг; если запрос не удался, разрешаем повторную проверку.
-            if (!await RequestNextStepAsync(session, next))
+            // При ошибке «Дальше» снова включит AskForNextStep.
+            // Здесь возвращаем только кнопку переделки.
+            if (!await AskForNextStep(session, next))
                 revise.IsEnabled = true;
         };
 
         revise.Click += async (_, _) =>
         {
-            // Пока работает запрос, повторное нажатие ничего не делает.
             if (_busy)
                 return;
 
             next.IsEnabled = false;
             revise.IsEnabled = false;
-            GuideStepResponse? result = await ReviseStepAsync(
-                session, request, message, current, recorded);
+            // В Python уходит current — текст совета без строки «Шаг N».
+            StepAnswer? result = await ReviseStep(session, request, message, current, saved);
             if (result is null)
             {
-                // При ошибке возвращаем кнопкам прежнюю доступность.
+                // Ошибка: оставляем прежний текст и прежние кнопки.
                 next.IsEnabled = !complete;
                 revise.IsEnabled = true;
                 return;
             }
 
-            // После успешного повтора кнопки учитывают новый ответ.
             current = result.Instruction;
             complete = result.Done;
             next.IsEnabled = !complete;
@@ -266,66 +236,60 @@ public sealed partial class MainWindow : Window
         };
     }
 
-    // Просит ИИ перепроверить ответ с тем же снимком и прежней историей.
-    private async Task<GuideStepResponse?> ReviseStepAsync(
-        GuideSession session,
+    // Просит ИИ ещё раз посмотреть тот же снимок и тот же прошлый совет.
+    private async Task<StepAnswer?> ReviseStep(
+        TaskSession session,
         StepRequest request,
         ChatMessage message,
         string previous,
-        bool recorded)
+        bool saved)
     {
         SetBusy(true);
-        // Сохраняем текст, чтобы восстановить его, если повторный запрос не удастся.
+        // Если запрос сорвётся, вернём на экран то, что уже было показано.
         string oldText = message.Text.Text;
 
         try
         {
-            SetStatus(message, null);
-            GuideStepResponse result = await GetAnswerFromPythonAsync(
-                session, request, previous, message);
+            StepAnswer result = await AskPython(session, request, previous);
             string instruction = result.Instruction.Trim();
             ShowStep(message, request.Number, instruction, result.Done);
-            // Запоминаем просьбу перепроверить и исправленный ответ.
-            session.History.Add(new GuideMemoryMessage(
+            session.History.Add(new MemoryMessage(
                 "user", "Пользователя что-то не устроило - проверь внимательнее."));
-            session.History.Add(new GuideMemoryMessage("assistant", instruction));
-            // Если шаг уже подтверждали, исправляем его текст в списке выполненных.
-            if (recorded && request.Number <= session.CompletedSteps.Count)
+            session.History.Add(new MemoryMessage("assistant", instruction));
+            // Если шаг уже подтвердили, исправляем его текст, а не добавляем новый.
+            if (saved && request.Number <= session.CompletedSteps.Count)
                 session.CompletedSteps[request.Number - 1] = instruction;
-            return new GuideStepResponse(result.Done, instruction);
+            return new StepAnswer(result.Done, instruction);
         }
         catch (Exception)
         {
-            // Не теряем прежний ответ, если связь с Python или ИИ не сработала.
             UpdateText(message.Text, oldText);
-            SetStatus(message, "Не получилось переделать ответ. Попробуй ещё раз.");
             return null;
         }
         finally
         {
-            // Этот блок выполняется и после успеха, и после ошибки.
+            // finally выполняется и после успеха, и после ошибки.
             SetBusy(false);
         }
     }
 
-    // Добавляет кнопку для повторного запроса после ошибки.
-    private void AddRetryButton(ChatMessage message, GuideSession session)
+    // Кнопка на случай, когда самый первый запрос задачи не удался.
+    private void AddRetryButton(ChatMessage message, TaskSession session)
     {
         var retry = new Button { Content = "Повторить" };
         retry.Click += async (_, _) =>
         {
-            // Оставляем сообщение об ошибке, если повтор снова не удался.
-            if (!await RequestNextStepAsync(session, retry))
+            if (!await AskForNextStep(session, retry))
                 return;
 
-            // После успешного повтора убираем старое сообщение об ошибке.
+            // Успех уже показал новую карточку. Старую карточку с «Повторить» убираем.
             ChatMessages.Children.Remove(message.Bubble);
             PromptInput.Text = "";
         };
         message.Body.Children.Add(retry);
     }
 
-    // Разрешает или блокирует отправку текста на время запроса.
+    // Блокирует ввод на время снимка и запроса к ИИ.
     private void SetBusy(bool busy)
     {
         _busy = busy;
@@ -333,49 +297,47 @@ public sealed partial class MainWindow : Window
         PromptInput.IsEnabled = !busy;
     }
 
-    // Полный порядок запроса: сделать снимок, спросить ИИ, показать ответ.
-    private async Task<bool> RequestNextStepAsync(GuideSession session, Button? source = null)
+    // Полный цикл нового шага: снимок, вопрос к ИИ, карточка с кнопками.
+    // source — кнопка, которая запустила шаг. У первой отправки её нет.
+    private async Task<bool> AskForNextStep(TaskSession session, Button? source = null)
     {
         if (_busy)
             return false;
 
         SetBusy(true);
         if (source is not null)
-            // На время запроса блокируем кнопку, которая его запустила.
             source.IsEnabled = false;
 
-        // Сначала показываем, что ответ готовится.
         ChatMessage message = AddMessage("Смотрю на экран...", false);
-        // Следующий номер равен числу подтверждённых шагов плюс один.
+        // Номер шага на экране = сколько шагов уже подтверждено + 1.
         int number = session.CompletedSteps.Count + 1;
-        bool delivered = false;
+        bool ok = false;
 
         try
         {
-            // Окно скрывается на время снимка, чтобы не попасть в изображение.
-            string image = await CaptureScreenAsync();
-            // Снимок и историю копируем в неизменяемый набор для этого запроса.
+            string image = await TakeScreenshot();
+            // ToArray копирует списки. Дальнейшие «Дальше» не изменят этот запрос.
             var request = new StepRequest(
                 session.CompletedSteps.ToArray(),
                 session.History.ToArray(),
                 image,
                 number);
 
-            GuideStepResponse result = await GetAnswerFromPythonAsync(
-                session, request, null, message);
+            StepAnswer result = await AskPython(session, request, null);
             string instruction = result.Instruction.Trim();
-            // Показываем инструкцию и запоминаем её для следующего шага.
             ShowStep(message, number, instruction, result.Done);
-            session.History.Add(new GuideMemoryMessage("assistant", instruction));
+            session.History.Add(new MemoryMessage("assistant", instruction));
             AddStepButtons(message, session, request, instruction, result.Done);
-            delivered = true;
+            ok = true;
         }
         catch (Exception)
         {
-            // Первую ошибку показываем с кнопкой повтора; ошибки продолжения скрываем.
+            // Текст ошибки не показываем.
+            // Первая отправка получает кнопку «Повторить».
+            // Повтор с «Дальше» просто убирает пустую карточку.
             if (source is null)
             {
-                UpdateText(message.Text, "Не получилось получить шаг. Попробуй ещё раз.");
+                message.Body.Children.Remove(message.Text);
                 AddRetryButton(message, session);
             }
             else
@@ -385,183 +347,98 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            // В любом случае разрешаем ввод и правильно включаем кнопку-источник.
             SetBusy(false);
+            // После неудачи кнопку-источник можно нажать снова.
             if (source is not null)
-                source.IsEnabled = !delivered;
+                source.IsEnabled = !ok;
         }
 
-        return delivered;
+        return ok;
     }
 
-    // Передаёт запрос Python и обновляет карточку по мере прихода текста.
-    private async Task<GuideStepResponse> GetAnswerFromPythonAsync(
-        GuideSession session,
-        StepRequest request,
-        string? previous,
-        ChatMessage message)
+    // Собирает JSON-команду answer и ждёт итоговую строку от Python.
+    // previous равен null для нового шага и заполнен при переделке.
+    private async Task<StepAnswer> AskPython(TaskSession session, StepRequest request, string? previous)
     {
-        // StringBuilder удобно добавляет много небольших частей одной строки.
-        var text = new StringBuilder($"Шаг {request.Number}\n");
-        // callback и очередь окна могут обращаться к этим значениям в разное время.
-        var updateLock = new object();
-        bool updateQueued = false;
-        bool finished = false;
-
-        GuideStepResponse result = await GetNextStepAsync(
-            session.Question,
-            request.CompletedSteps,
-            request.History,
-            request.Image,
-            previous,
-            fragment =>
-            {
-                // Фрагмент дописываем под блокировкой, чтобы текст не повредился.
-                bool enqueueUpdate = false;
-                lock (updateLock)
-                {
-                    text.Append(fragment);
-                    // Пока обновление уже стоит в очереди, второе не добавляем.
-                    if (!updateQueued)
-                    {
-                        updateQueued = true;
-                        enqueueUpdate = true;
-                    }
-                }
-
-                if (!enqueueUpdate)
-                    return;
-
-                // Изменять элементы интерфейса нужно в очереди главного окна.
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    string? currentText;
-                    lock (updateLock)
-                    {
-                        updateQueued = false;
-                        // После конца запроса не ставим устаревшее обновление на экран.
-                        currentText = finished ? null : text.ToString();
-                    }
-
-                    if (currentText is not null)
-                        UpdateText(message.Text, currentText, scrollToLatest: false);
-                });
-            });
-
-        // Помечаем ответ завершённым, прежде чем вернуть его вызывающему коду.
-        lock (updateLock)
-            finished = true;
-
-        return result;
-    }
-
-    // Формирует JSON-команду для Python и получает итоговое событие.
-    private async Task<GuideStepResponse> GetNextStepAsync(
-        string question,
-        IReadOnlyList<string> completedSteps,
-        IReadOnlyList<GuideMemoryMessage> history,
-        string image,
-        string? previousAnswer,
-        Action<string> onText)
-    {
-        // Имена с подчёркиванием совпадают с теми, которые ожидает brain.py.
-        var request = new
+        var command = new
         {
             action = "answer",
-            question,
-            completed_steps = completedSteps,
-            history,
-            image,
-            previous_answer = previousAnswer
+            question = session.Question,
+            completed_steps = request.CompletedSteps,
+            history = request.History,
+            image = request.Image,
+            previous_answer = previous
         };
 
-        // Python присылает текст отдельными delta-событиями и затем итог.
-        BrainEvent result = await RunBrainAsync(request, item =>
-        {
-            if (item.Type == "delta")
-                onText(item.Text ?? "");
-        });
-        return new GuideStepResponse(result.Done, result.Instruction ?? "");
+        BrainEvent result = await RunPython(command);
+        return new StepAnswer(result.Done, result.Instruction ?? "");
     }
 
-    // Отдельная команда Python делает снимок экрана без запроса к ИИ.
-    private async Task<string> CaptureScreenFromPythonAsync()
+    // Прячет окно, просит Python снять экран и снова показывает окно.
+    private async Task<string> TakeScreenshot()
     {
-        BrainEvent result = await RunBrainAsync(new { action = "capture" }, _ => { });
-        return result.Image
-            ?? throw new InvalidOperationException("Python не вернул снимок экрана.");
+        // Иначе на снимке будет сам OrdinaTuteur, а не программа пользователя.
+        AppWindow.Hide();
+        try
+        {
+            // Короткая пауза даёт Windows время убрать окно с экрана.
+            await Task.Delay(150);
+            BrainEvent result = await RunPython(new { action = "capture" });
+            if (string.IsNullOrWhiteSpace(result.Image))
+                throw new InvalidOperationException("Python не вернул снимок экрана.");
+            return result.Image;
+        }
+        finally
+        {
+            // Окно возвращаем даже если снимок не удался.
+            AppWindow.Show();
+            Activate();
+        }
     }
 
-    // Запускает brain.py, отправляет ему JSON и читает строки JSON-событий.
-    private static async Task<BrainEvent> RunBrainAsync(object input, Action<BrainEvent> onEvent)
+    // Запускает brain.py, отдаёт ему одну команду и читает строки ответа.
+    private static async Task<BrainEvent> RunPython(object command)
     {
-        // Можно задать полный путь к Python; иначе используем стандартный Windows Launcher.
-        string? configuredPython = Environment.GetEnvironmentVariable("ORDINATUTEUR_PYTHON");
-        var start = new ProcessStartInfo
-        {
-            FileName = string.IsNullOrWhiteSpace(configuredPython) ? "py" : configuredPython,
-            WorkingDirectory = AppContext.BaseDirectory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            StandardInputEncoding = Utf8,
-            StandardOutputEncoding = Utf8,
-            StandardErrorEncoding = Utf8
-        };
-        if (string.IsNullOrWhiteSpace(configuredPython))
-            // Launcher py получает параметр -3, чтобы выбрать Python 3.
-            start.ArgumentList.Add("-3");
-
-        // Python-скрипт лежит рядом с собранным приложением.
-        start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, "brain.py"));
-        // Настраиваем Python на UTF-8, чтобы русский текст не повредился.
-        start.Environment["PYTHONIOENCODING"] = "utf-8";
-
-        // Запускаем процесс и сразу начинаем читать ошибки, чтобы не заполнить буфер.
-        using Process process = Process.Start(start)
-            ?? throw new InvalidOperationException("Не удалось запустить Python.");
+        using Process process = StartPython();
+        // Ошибки читаем сразу и параллельно. Иначе заполненный буфер
+        // может навсегда остановить Python, а окно будет ждать вывод.
         Task<string> errors = process.StandardError.ReadToEndAsync();
 
         try
         {
-            // Передаём одну JSON-команду и закрываем ввод, сообщая Python, что данных больше нет.
-            await process.StandardInput.WriteAsync(
-                JsonSerializer.Serialize(input, JsonOptions));
+            await process.StandardInput.WriteAsync(JsonSerializer.Serialize(command, JsonOptions));
+            // Закрытый ввод говорит Python, что команда закончилась.
             process.StandardInput.Close();
 
             BrainEvent? result = null;
             string? line;
-            // Python выдаёт по одному JSON-событию на каждой строке.
             while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
             {
                 BrainEvent? item = JsonSerializer.Deserialize<BrainEvent>(line, JsonOptions);
                 if (item is null)
                     continue;
 
-                onEvent(item);
-                // Последнее событие содержит результат снимка или полный ответ ИИ.
+                // capture — это снимок, result — готовый шаг.
                 if (item.Type == "result" || item.Type == "capture")
                     result = item;
             }
 
-            // Дожидаемся завершения Python и чтения его потока ошибок.
             await process.WaitForExitAsync();
+            // Сам текст ошибки пользователю не нужен, но дочитать поток надо.
             _ = await errors;
 
-            // Ошибкой считается сбой Python или отсутствие обязательного результата.
-            if (process.ExitCode != 0
-                || result is null
-                || (result.Type == "result" && string.IsNullOrWhiteSpace(result.Instruction))
-                || (result.Type == "capture" && string.IsNullOrWhiteSpace(result.Image)))
+            if (process.ExitCode != 0 || result is null)
+                throw new InvalidOperationException("Не удалось получить ответ.");
+            if (result.Type == "result" && string.IsNullOrWhiteSpace(result.Instruction))
+                throw new InvalidOperationException("Не удалось получить ответ.");
+            if (result.Type == "capture" && string.IsNullOrWhiteSpace(result.Image))
                 throw new InvalidOperationException("Не удалось получить ответ.");
 
             return result;
         }
         catch
         {
-            // Если запрос прервался, закрываем Python и его дочерние процессы.
+            // Если окно уже не ждёт ответ, Python тоже нужно остановить.
             if (!process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
@@ -571,30 +448,59 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // Показывает номер шага, но убирает его, когда задача уже завершена.
+    // Ищет Python на этом компьютере и запускает brain.py без окна консоли.
+    // Свой путь можно задать переменной среды ORDINATUTEUR_PYTHON.
+    private static Process StartPython()
+    {
+        string? custom = Environment.GetEnvironmentVariable("ORDINATUTEUR_PYTHON");
+        // BaseDirectory — папка exe. Туда сборка копирует brain.py и AIKey.py.
+        string brain = Path.Combine(AppContext.BaseDirectory, "brain.py");
+        // py -3 — обычный запуск Python 3 в Windows. Если его нет, пробуем python.
+        string[] programs = string.IsNullOrWhiteSpace(custom) ? ["py", "python"] : [custom];
+
+        foreach (string program in programs)
+        {
+            try
+            {
+                var start = new ProcessStartInfo
+                {
+                    FileName = program,
+                    WorkingDirectory = AppContext.BaseDirectory,
+                    // false: запускаем программу напрямую и можем читать её текст.
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardInputEncoding = Utf8,
+                    StandardOutputEncoding = Utf8,
+                    StandardErrorEncoding = Utf8
+                };
+                // Дублируем UTF-8 для Python, даже если консоль Windows другая.
+                start.Environment["PYTHONIOENCODING"] = "utf-8";
+                if (program == "py")
+                    start.ArgumentList.Add("-3");
+                start.ArgumentList.Add(brain);
+
+                Process? process = Process.Start(start);
+                if (process is not null)
+                    return process;
+            }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                // Этой команды на компьютере нет. Пробуем следующее имя.
+            }
+        }
+
+        throw new InvalidOperationException("Не удалось запустить Python.");
+    }
+
+    // У готовой задачи номер шага не показываем: остаётся короткое подтверждение.
     private void ShowStep(ChatMessage message, int number, string text, bool done)
     {
         if (done)
             UpdateText(message.Text, text);
         else
-            UpdateText(message.Text, $"Шаг {number}\n{text}");
-    }
-
-    // Временно прячет окно, чтобы оно не попало в снимок экрана.
-    private async Task<string> CaptureScreenAsync()
-    {
-        AppWindow.Hide();
-        try
-        {
-            // Короткая пауза даёт Windows время убрать окно перед снимком.
-            await Task.Delay(150);
-            return await CaptureScreenFromPythonAsync();
-        }
-        finally
-        {
-            // Показываем окно и возвращаем ему фокус даже после ошибки снимка.
-            AppWindow.Show();
-            Activate();
-        }
+            UpdateText(message.Text, "Шаг " + number + "\n" + text);
     }
 }
